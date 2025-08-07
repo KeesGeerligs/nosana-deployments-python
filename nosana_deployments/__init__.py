@@ -37,7 +37,7 @@ from .models.deployment import (
     VaultWithdrawResponse,
 )
 from .types.config import DeploymentConfig
-from .utils.errors import DeploymentError
+from .utils.errors import DeploymentError, DeploymentAPIError, DeploymentAuthError, DeploymentValidationError
 
 __version__ = "0.1.0"
 __all__ = [
@@ -52,6 +52,9 @@ __all__ = [
     "DeploymentStrategy",
     "DeploymentConfig",
     "DeploymentError",
+    "DeploymentAPIError",
+    "DeploymentAuthError", 
+    "DeploymentValidationError",
     "VaultBalanceResponse",
     "VaultWithdrawResponse",
 ]

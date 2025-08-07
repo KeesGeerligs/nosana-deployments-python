@@ -199,6 +199,7 @@ def load_wallet_key_from_env(env_prefix: str = "") -> str:
     """Load wallet private key from environment.
     
     Looks for {env_prefix}WALLET_PRIVATE_KEY in environment.
+    Supports both base58 (Solana format) and hex formats.
     
     Args:
         env_prefix: Optional prefix for environment variable name
@@ -212,9 +213,32 @@ def load_wallet_key_from_env(env_prefix: str = "") -> str:
     key_var = f"{env_prefix}WALLET_PRIVATE_KEY"
     private_key = must_read_env_str(key_var)
     
-    # Remove 0x prefix if present
-    if private_key.startswith("0x"):
-        private_key = private_key[2:]
+    # Handle base58 format (Solana standard)
+    if len(private_key) > 64 and not private_key.startswith("0x"):
+        try:
+            import base58
+            decoded_bytes = base58.b58decode(private_key)
+            private_key = decoded_bytes.hex()
+        except ImportError:
+            # Fallback: try with solders if available
+            try:
+                from solders.keypair import Keypair
+                keypair = Keypair.from_base58_string(private_key)
+                private_key = bytes(keypair).hex()
+            except Exception as e:
+                raise DeploymentError(
+                    f"Unable to decode base58 private key. Install base58 package or provide hex format: {e}",
+                    error_code="INVALID_KEY_FORMAT"
+                ) from e
+        except Exception as e:
+            raise DeploymentError(
+                f"Invalid base58 private key format: {e}",
+                error_code="INVALID_BASE58_KEY"
+            ) from e
+    else:
+        # Handle hex format
+        if private_key.startswith("0x"):
+            private_key = private_key[2:]
     
     return private_key
 

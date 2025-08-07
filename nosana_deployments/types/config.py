@@ -82,7 +82,7 @@ class DeploymentConfig:
         """
         urls = {
             "mainnet": "https://deployment-manager.k8s.prd.nos.ci",
-            "devnet": "https://deployment-manager.k8s.dev.nos.ci"  # Assuming devnet URL
+            "devnet": "https://deployment-manager.k8s.prd.nos.ci"  # Use prod for now since devnet has issues
         }
         return urls[self.environment]
     
