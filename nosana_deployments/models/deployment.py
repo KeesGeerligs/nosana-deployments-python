@@ -47,12 +47,12 @@ class Deployment(BaseNosanaModel):
     timeout: int = Field(..., ge=60, description="Timeout in seconds")
     replicas: int = Field(..., ge=1, description="Number of replicas")
     status: DeploymentStatus = Field(..., description="Deployment status")
-    ipfs_definition_hash: str = Field(..., description="IPFS hash of job definition")
+    ipfs_definition_hash: str = Field(..., alias="ipfs_definition_hash", description="IPFS hash of job definition")
     events: List[dict] = Field(default_factory=list, description="Deployment events")
     jobs: List[dict] = Field(default_factory=list, description="Associated jobs")
     updated_at: datetime = Field(..., description="Last update timestamp")
     created_at: datetime = Field(..., description="Creation timestamp")
-    vault: dict = Field(..., description="Vault information")
+    vault: str = Field(..., description="Vault public key")
     
     # Strategy-dependent fields
     strategy: DeploymentStrategy = Field(..., description="Deployment strategy")
@@ -77,7 +77,7 @@ class DeploymentCreateRequest(BaseNosanaModel):
     
     name: str = Field(..., description="Deployment name")
     market: str = Field(..., description="Market public key")
-    ipfs_definition_hash: str = Field(..., description="IPFS hash of job definition")
+    ipfs_definition_hash: str = Field(..., alias="ipfs_definition_hash", description="IPFS hash of job definition")
     replicas: int = Field(1, ge=1, description="Number of replicas")
     timeout: int = Field(3600, ge=60, description="Timeout in seconds")
     strategy: DeploymentStrategy = Field(..., description="Deployment strategy")

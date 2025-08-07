@@ -5,30 +5,60 @@ Simple Python SDK for the Nosana Deployment Manager API. **Matches the TypeScrip
 ## 🚀 Quick Start
 
 ```python
-import os
-from nosana_deployments import create_nosana_deployment_client
+from nosana_deployments import create_nosana_deployment_client, upload_job_to_ipfs
 
-# Create client - exactly like TypeScript SDK
+# 1. Upload job definition to IPFS
+job_definition = {
+    "ops": [{
+        "id": "pytorch-jupyter",
+        "type": "container/run", 
+        "args": {
+            "image": "docker.io/nosana/pytorch-jupyter:2.0.0",
+            "cmd": ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser"],
+            "gpu": True,
+            "expose": 8888
+        }
+    }],
+    "type": "container",
+    "version": "0.1"
+}
+
+ipfs_hash = upload_job_to_ipfs(job_definition)
+
+# 2. Create client - exactly like TypeScript SDK
 client = create_nosana_deployment_client(
     manager="https://deployment-manager.k8s.prd.nos.ci",
-    key=os.getenv("WALLET_PRIVATE_KEY")  # or hardcode your key
+    key="your_wallet_private_key"
 )
 
-# Create deployment
+# 3. Create deployment
 deployment = client.create({
-    "name": "My Deployment",
-    "market": "7AtiXMSH6R1jjBxrcYjehCkkSF7zvYWte63gwEDBcGHq",
-    "ipfs_definition_hash": "QmYourJobDefinitionHash",
+    "name": "PyTorch Jupyter Lab",
+    "market": "97G9NnvBDQ2WpKu6fasoMsAKmfj63C9rhysJnkeWodAf",
+    "ipfs_definition_hash": ipfs_hash,
     "strategy": "SIMPLE",
     "replicas": 1,
     "timeout": 3600
 })
 
-# Use deployment methods - exactly like TypeScript
-deployment.start()
-deployment.updateReplicaCount(3)
-deployment.stop()
+# 4. Fund vault (manual step)
+print(f"Fund this vault: {deployment.vault}")
+print(f"https://solscan.io/account/{deployment.vault}")
+
+# 5. Check balance and start
+balance = deployment.updateVaultBalance()  
+deployment.start()  # Once funded
 ```
+
+## 🎯 Complete Workflow
+
+For a full deployment example with funding instructions:
+
+```bash
+python deploy_job.py
+```
+
+This script demonstrates the complete process from job definition to running deployment.
 
 ## 📦 Installation
 
@@ -77,6 +107,45 @@ deployment.archive()                  # Archive deployment
 deployment.getTasks()                 # Get scheduled tasks
 deployment.updateReplicaCount(5)      # Update replicas
 deployment.updateTimeout(7200)        # Update timeout
+deployment.updateVaultBalance()       # Refresh vault balance from blockchain
+```
+
+### IPFS Upload
+
+Upload job definitions to IPFS using Pinata (same as TypeScript SDK):
+
+```python
+from nosana_deployments import upload_job_to_ipfs
+
+# Upload job definition
+ipfs_hash = upload_job_to_ipfs({
+    "ops": [{"id": "my-job", "type": "container/run", "args": {...}}],
+    "type": "container",
+    "version": "0.1"
+})
+
+# Use in deployment
+deployment = client.create({
+    "ipfs_definition_hash": ipfs_hash,
+    # ... other fields
+})
+```
+
+### Vault Funding
+
+Deployments require funded vaults to run:
+
+```python
+# After creating deployment
+print(f"Vault address: {deployment.vault}")
+print(f"Fund at: https://solscan.io/account/{deployment.vault}")
+
+# Check balance
+balance = deployment.updateVaultBalance()
+sol_balance = balance['SOL'] / 1e9  # Convert lamports to SOL
+nos_balance = balance['NOS'] / 1e6  # Convert to NOS
+
+print(f"Balance: {sol_balance:.6f} SOL, {nos_balance:.6f} NOS")
 ```
 
 ## 📋 Complete Example
@@ -154,7 +223,10 @@ This Python SDK provides **identical** functionality to the TypeScript SDK:
 | `client.list()` | `client.list()` |
 | `client.pipe()` | `client.pipe()` |
 | `deployment.start()` | `deployment.start()` |
+| `deployment.stop()` | `deployment.stop()` |
 | `deployment.updateReplicaCount()` | `deployment.updateReplicaCount()` |
+| `deployment.updateTimeout()` | `deployment.updateTimeout()` |
+| `IPFS.pin()` | `upload_job_to_ipfs()` |
 
 ## 📁 Project Structure
 

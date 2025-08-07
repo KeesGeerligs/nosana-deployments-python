@@ -31,6 +31,8 @@ Example:
 
 from .client import create_nosana_deployment_client
 from .models.deployment import Deployment, DeploymentStrategy, DeploymentStatus
+from .ipfs import upload_job_to_ipfs
+from .vault import create_vault
 
 __version__ = "0.1.0"
 __all__ = [
@@ -38,4 +40,6 @@ __all__ = [
     "Deployment",
     "DeploymentStrategy", 
     "DeploymentStatus",
+    "upload_job_to_ipfs",
+    "create_vault",
 ]

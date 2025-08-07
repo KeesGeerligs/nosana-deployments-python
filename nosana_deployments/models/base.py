@@ -42,4 +42,4 @@ class BaseNosanaModel(BaseModel):
         Returns:
             Dictionary representation using camelCase field names
         """
-        return self.model_dump(by_alias=True)
+        return self.model_dump(by_alias=True, exclude_none=True)

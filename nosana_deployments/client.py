@@ -9,9 +9,11 @@ from typing import Dict, List, Union, Callable, Any, Optional
 
 from solders.keypair import Keypair
 import httpx
+import requests
 
 from .models.deployment import Deployment, DeploymentCreateRequest
 from .auth import WalletAuth
+from .vault import create_vault
 
 
 class DeploymentsClient:
@@ -101,6 +103,10 @@ class DeploymentsClient:
         deployment.__dict__['getTasks'] = lambda: self._get_deployment_tasks(deployment.id)
         deployment.__dict__['updateReplicaCount'] = lambda replicas: self._update_replica_count(deployment.id, replicas)
         deployment.__dict__['updateTimeout'] = lambda timeout: self._update_timeout(deployment.id, timeout)
+        deployment.__dict__['updateVaultBalance'] = lambda: self.update_vault_balance(deployment.vault)
+        
+        # Attach vault instance
+        deployment.__dict__['vault_instance'] = lambda: self.get_vault(deployment.vault)
     
     def _start_deployment(self, deployment_id: str) -> None:
         """Start deployment."""
@@ -125,6 +131,110 @@ class DeploymentsClient:
     def _update_timeout(self, deployment_id: str, timeout: int) -> None:
         """Update timeout."""
         self._request("PATCH", f"/api/deployment/{deployment_id}/update-timeout", json={"timeout": timeout})
+    
+    def update_vault_balance(self, vault_id: str) -> Dict[str, float]:
+        """Update vault balance from blockchain.
+        
+        Args:
+            vault_id: Vault public key
+            
+        Returns:
+            Dictionary with SOL and NOS balances
+        """
+        return self._request("PATCH", f"/api/vault/{vault_id}/update-balance")
+    
+    def topup_vault(self, vault_id: str, sol_amount: float = 0.0, nos_amount: float = 0.0) -> str:
+        """Transfer SOL and/or NOS from user wallet to vault.
+        
+        Args:
+            vault_id: Target vault public key
+            sol_amount: Amount of SOL to transfer (e.g. 0.01 = 0.01 SOL)
+            nos_amount: Amount of NOS to transfer (e.g. 10 = 10 NOS)
+            
+        Returns:
+            Transaction signature
+        """
+        if sol_amount <= 0 and nos_amount <= 0:
+            raise ValueError("Must specify positive amount for SOL or NOS")
+        
+        # For now, implement SOL transfer (simpler)
+        if sol_amount > 0:
+            return self._transfer_sol_to_vault(vault_id, sol_amount)
+        else:
+            raise NotImplementedError("NOS transfer not yet implemented")
+    
+    def _transfer_sol_to_vault(self, vault_id: str, sol_amount: float) -> str:
+        """Transfer SOL from user wallet to vault using Solana RPC.
+        
+        Args:
+            vault_id: Target vault public key
+            sol_amount: SOL amount to transfer
+            
+        Returns:
+            Transaction signature
+        """
+        try:
+            # Convert SOL to lamports
+            lamports = int(sol_amount * 1_000_000_000)
+            
+            # Create transfer instruction
+            from_pubkey = Pubkey.from_string(str(self.wallet.pubkey()))
+            to_pubkey = Pubkey.from_string(vault_id)
+            
+            # Use public Solana RPC (you may want to use a dedicated RPC endpoint)
+            rpc_url = "https://api.mainnet-beta.solana.com"
+            
+            # Get recent blockhash
+            response = requests.post(rpc_url, json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getLatestBlockhash"
+            })
+            
+            if response.status_code != 200:
+                raise Exception(f"Failed to get blockhash: {response.status_code}")
+            
+            result = response.json()
+            if "error" in result:
+                raise Exception(f"RPC error: {result['error']}")
+                
+            blockhash = result["result"]["value"]["blockhash"]
+            
+            # Create transfer instruction
+            transfer_ix = transfer(
+                TransferParams(
+                    from_pubkey=from_pubkey,
+                    to_pubkey=to_pubkey, 
+                    lamports=lamports
+                )
+            )
+            
+            # This is a simplified implementation
+            # A full implementation would need to:
+            # 1. Create a proper transaction with the instruction
+            # 2. Sign it with the wallet
+            # 3. Send it to the network
+            # 4. Wait for confirmation
+            
+            raise NotImplementedError(
+                "Direct SOL transfer requires more complex transaction building. "
+                "Please fund the vault manually for now. "
+                f"Send {sol_amount} SOL to: {vault_id}"
+            )
+            
+        except Exception as e:
+            raise Exception(f"Vault topup failed: {e}")
+    
+    def get_vault(self, vault_id: str):
+        """Get vault instance for managing vault operations.
+        
+        Args:
+            vault_id: Vault public key
+            
+        Returns:
+            Vault instance with topup, withdraw, getBalance methods
+        """
+        return create_vault(vault_id, self.wallet, self)
     
     def close(self) -> None:
         """Close HTTP client."""
