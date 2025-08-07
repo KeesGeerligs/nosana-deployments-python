@@ -1,60 +1,41 @@
 """Nosana Deployments Python SDK.
 
-A Python SDK for interacting with the Nosana Deployment Manager API.
-Following the design patterns and code standards of the Theoriq Agent SDK.
+Simple Python SDK for the Nosana Deployment Manager API.
 
 Example:
     ```python
-    from nosana_deployments import DeploymentContext, DeploymentConfig
+    import os
+    from nosana_deployments import create_nosana_deployment_client
     
-    # Create config from environment
-    config = DeploymentConfig.from_env()
-    
-    # Create context
-    context = DeploymentContext(config.wallet, config.environment)
+    # Create client
+    client = create_nosana_deployment_client(
+        manager="https://deployment-manager.k8s.prd.nos.ci",
+        key=os.getenv("WALLET_PRIVATE_KEY")
+    )
     
     # Create deployment
-    deployment = context.create_deployment(
-        name="My Deployment",
-        market="7AtiXMSH6R1jjBxrcYjehCkkSF7zvYWte63gwEDBcGHq",
-        ipfs_definition_hash="QmHash...",
-        strategy="SIMPLE"
-    )
+    deployment = client.create({
+        "name": "My Deployment",
+        "market": "7AtiXMSH6R1jjBxrcYjehCkkSF7zvYWte63gwEDBcGHq",
+        "ipfs_definition_hash": "QmHash...",
+        "strategy": "SIMPLE",
+        "replicas": 1,
+        "timeout": 3600
+    })
+    
+    # Use deployment methods
+    deployment.start()
+    deployment.stop()
     ```
 """
 
-from .api.deployments import DeploymentContext
-from .models.deployment import (
-    Deployment,
-    DeploymentArchiveResponse,
-    DeploymentCreateRequest,
-    DeploymentStartResponse,
-    DeploymentStatus,
-    DeploymentStatusResponse,
-    DeploymentStopResponse,
-    DeploymentStrategy,
-    VaultBalanceResponse,
-    VaultWithdrawResponse,
-)
-from .types.config import DeploymentConfig
-from .utils.errors import DeploymentError, DeploymentAPIError, DeploymentAuthError, DeploymentValidationError
+from .client import create_nosana_deployment_client
+from .models.deployment import Deployment, DeploymentStrategy, DeploymentStatus
 
 __version__ = "0.1.0"
 __all__ = [
-    "DeploymentContext",
+    "create_nosana_deployment_client",
     "Deployment",
-    "DeploymentArchiveResponse",
-    "DeploymentCreateRequest",
-    "DeploymentStartResponse",
+    "DeploymentStrategy", 
     "DeploymentStatus",
-    "DeploymentStatusResponse",
-    "DeploymentStopResponse",
-    "DeploymentStrategy",
-    "DeploymentConfig",
-    "DeploymentError",
-    "DeploymentAPIError",
-    "DeploymentAuthError", 
-    "DeploymentValidationError",
-    "VaultBalanceResponse",
-    "VaultWithdrawResponse",
 ]

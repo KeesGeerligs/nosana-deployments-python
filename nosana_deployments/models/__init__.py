@@ -1,4 +1,4 @@
-"""Pydantic models for Nosana Deployments SDK."""
+"""Simple deployment models."""
 
 from .base import BaseNosanaModel
 from .deployment import (
@@ -6,9 +6,6 @@ from .deployment import (
     DeploymentCreateRequest,
     DeploymentStatus,
     DeploymentStrategy,
-    Event,
-    Job,
-    Task,
 )
 
 __all__ = [
@@ -17,7 +14,4 @@ __all__ = [
     "DeploymentCreateRequest", 
     "DeploymentStatus",
     "DeploymentStrategy",
-    "Event",
-    "Job", 
-    "Task",
 ]
