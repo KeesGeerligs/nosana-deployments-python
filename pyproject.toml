@@ -1,0 +1,69 @@
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[project]
+name = "nosana-deployments"
+version = "0.1.0"
+description = "Python SDK for Nosana Deployment Manager"
+readme = "README.md"
+requires-python = ">=3.9,<4.0"
+authors = [
+    {name = "Nosana", email = "info@nosana.io"}
+]
+license = {text = "MIT"}
+
+dependencies = [
+    "pydantic>=2.8.0,<3.0",
+    "httpx>=0.27.0,<1.0",
+    "solders>=0.21.0,<1.0",
+    "python-dotenv>=1.0.0,<2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black==25.1.0",
+    "mypy==1.17.0",
+    "ruff==0.12.4",
+    "pytest==7.4.*",
+    "pytest-asyncio>=0.21.0",
+    "types-python-dotenv>=1.0.0",
+]
+
+[tool.poetry.group.dev]
+optional = true
+
+[tool.poetry.group.dev.dependencies]
+black = "25.1.0"
+mypy = "1.17.0"
+ruff = "0.12.4"
+pytest = "7.4"
+pytest-asyncio = ">=0.21.0"
+types-python-dotenv = ">=1.0.0"
+
+[tool.black]
+line-length = 120
+
+[tool.mypy]
+exclude = "(?x)(venv|docs|tmp|examples)"
+explicit_package_bases = true
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["solders.*"]
+ignore_missing_imports = true
+
+[tool.ruff]
+exclude = ["__init__.py", "docs", "tmp"]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "C90", "I", "N", "D", "UP", "ANN", "S", "B", "A", "COM", "C4", "DTZ", "T10", "DJ", "EM", "EXE", "FA", "ISC", "ICN", "G", "INP", "PIE", "T20", "PYI", "PT", "Q", "RSE", "RET", "SLF", "SLOT", "SIM", "TID", "TCH", "INT", "ARG", "PTH", "TD", "FIX", "ERA", "PD", "PGH", "PL", "TRY", "FLY", "NPY", "AIR", "PERF", "FURB", "LOG", "RUF"]
+ignore = ["ANN101", "ANN102", "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107"]
+
+[tool.pytest.ini_options]
+log_cli = true
+log_cli_level = "DEBUG"
+log_cli_format = "[%(asctime)s %(levelname)s %(threadName)s %(name)s:%(funcName)s:%(lineno)s] %(message)s"
+log_cli_date_format = "%Y-%m-%d %H:%M:%S%z"
+testpaths = ["tests"]
