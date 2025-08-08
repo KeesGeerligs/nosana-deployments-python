@@ -297,6 +297,8 @@ class Vault:
             NOS_MINT = "nosXBVoaCTtYdLvKY6Csb4AC8JCdQKKAaWYtx2ZMoo7"
             SPL_TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
             ASSOCIATED_TOKEN_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+            SYSTEM_PROGRAM_ID = "11111111111111111111111111111111"
+            SYSVAR_RENT = "SysvarRent111111111111111111111111111111111"
             
             # Convert to smallest units if needed (NOS has 6 decimals)
             token_amount = int(amount) if lamports else int(amount * 1_000_000)
@@ -307,6 +309,8 @@ class Vault:
             nos_mint = Pubkey.from_string(NOS_MINT)
             spl_token_program = Pubkey.from_string(SPL_TOKEN_PROGRAM)
             ata_program = Pubkey.from_string(ASSOCIATED_TOKEN_PROGRAM)
+            system_program = Pubkey.from_string(SYSTEM_PROGRAM_ID)
+            rent_sysvar = Pubkey.from_string(SYSVAR_RENT)
             
             # Get associated token accounts
             from_token_account = self._get_associated_token_account(from_pubkey, nos_mint, ata_program, spl_token_program)
@@ -315,7 +319,7 @@ class Vault:
             # RPC connection
             rpc_url = "https://api.mainnet-beta.solana.com"
             
-            # Check NOS balance first
+            # Check NOS balance first (source account)
             balance_response = requests.post(rpc_url, json={
                 "jsonrpc": "2.0",
                 "id": 1,
@@ -329,6 +333,18 @@ class Vault:
                     current_balance = int(balance_result["result"]["value"]["amount"])
                     if current_balance < token_amount:
                         raise Exception(f"Insufficient NOS balance. Have {current_balance/1e6:.6f} NOS, need {token_amount/1e6:.6f} NOS")
+            
+            # Determine if destination ATA exists
+            dest_info = requests.post(rpc_url, json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getAccountInfo",
+                "params": [str(to_token_account), {"encoding": "base64"}]
+            })
+            dest_exists = False
+            if dest_info.status_code == 200:
+                dest_json = dest_info.json()
+                dest_exists = bool(dest_json.get("result", {}).get("value"))
             
             # Get recent blockhash
             blockhash_response = requests.post(rpc_url, json={
@@ -352,12 +368,31 @@ class Vault:
                 spl_token_program
             )
             
+            # Optionally prepend create associated token account instruction if needed
+            instructions = []
+            if not dest_exists:
+                create_ata_ix = Instruction(
+                    program_id=ata_program,
+                    accounts=[
+                        AccountMeta(pubkey=from_pubkey, is_signer=True, is_writable=True),  # payer
+                        AccountMeta(pubkey=to_token_account, is_signer=False, is_writable=True),  # ata
+                        AccountMeta(pubkey=to_pubkey, is_signer=False, is_writable=False),  # owner
+                        AccountMeta(pubkey=nos_mint, is_signer=False, is_writable=False),  # mint
+                        AccountMeta(pubkey=system_program, is_signer=False, is_writable=False),  # system program
+                        AccountMeta(pubkey=spl_token_program, is_signer=False, is_writable=False),  # token program
+                        AccountMeta(pubkey=rent_sysvar, is_signer=False, is_writable=False),  # rent sysvar
+                    ],
+                    data=bytes()
+                )
+                instructions.append(create_ata_ix)
+            instructions.append(transfer_instruction)
+            
             # Build transaction
             message = MessageV0.try_compile(
-                payer=from_pubkey,
-                instructions=[transfer_instruction],
-                address_lookup_tables=[],
-                recent_blockhash=blockhash
+                from_pubkey,
+                instructions,
+                [],
+                Hash.from_string(blockhash)
             )
             
             # Create and sign transaction
@@ -485,14 +520,28 @@ class Vault:
             # Deserialize the versioned transaction
             transaction = VersionedTransaction.from_bytes(transaction_bytes)
             
-            # Sign the transaction with our wallet
-            transaction.sign([self.wallet])
+            # Sign only our required signature while preserving others from the server
+            message = transaction.message
+            signer_pubkeys = list(message.signer_keys())
+            user_pubkey = Pubkey.from_string(str(self.wallet.pubkey()))
+            try:
+                signer_index = signer_pubkeys.index(user_pubkey)
+            except ValueError:
+                raise Exception("User wallet is not among required transaction signers")
+
+            # Compute user's signature over the canonical message bytes
+            user_signature = self.wallet.sign_message(bytes(message))
+
+            # Populate a new transaction with updated signatures
+            signatures = list(transaction.signatures)
+            signatures[signer_index] = user_signature
+            signed_transaction = VersionedTransaction.populate(message, signatures)
             
             # Send the transaction to Solana network
             rpc_url = "https://api.mainnet-beta.solana.com"
             
             # Serialize signed transaction
-            signed_transaction_bytes = bytes(transaction)
+            signed_transaction_bytes = bytes(signed_transaction)
             encoded_tx = base64.b64encode(signed_transaction_bytes).decode('ascii')
             
             # Send transaction

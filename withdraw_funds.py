@@ -8,7 +8,10 @@ Set WALLET_PRIVATE_KEY environment variable with your wallet private key.
 
 import asyncio
 import os
+from dotenv import load_dotenv
 from nosana_deployments import create_nosana_deployment_client
+
+load_dotenv()
 
 async def withdraw_all_funds():
     """Withdraw all funds from vault deployments."""

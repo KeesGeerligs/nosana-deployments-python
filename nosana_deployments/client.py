@@ -48,8 +48,8 @@ class DeploymentsClient:
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            # Enhanced error logging for debugging
-            if hasattr(e, 'response') and e.response:
+            # Enhanced error logging for debugging (opt-in)
+            if os.getenv("NOSANA_SDK_DEBUG") and hasattr(e, 'response') and e.response:
                 print(f"   🔍 Request details:")
                 print(f"      Method: {method}")
                 print(f"      URL: {self.base_url}{path}")
