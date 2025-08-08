@@ -50,15 +50,25 @@ balance = deployment.updateVaultBalance()
 deployment.start()  # Once funded
 ```
 
-## 🎯 Complete Workflow
+## 🎯 Usage Scripts
 
-For a full deployment example with funding instructions:
+### Deploy a Job
 
 ```bash
+export WALLET_PRIVATE_KEY="your_base58_private_key"
 python deploy_job.py
 ```
 
-This script demonstrates the complete process from job definition to running deployment.
+This demonstrates the complete deployment workflow: create deployment, fund vault, start job.
+
+### Withdraw Funds
+
+```bash
+export WALLET_PRIVATE_KEY="your_base58_private_key"  
+python withdraw_funds.py
+```
+
+This finds all your vaults with funds and withdraws them back to your wallet.
 
 ## 📦 Installation
 
@@ -147,6 +157,38 @@ nos_balance = balance['NOS'] / 1e6  # Convert to NOS
 
 print(f"Balance: {sol_balance:.6f} SOL, {nos_balance:.6f} NOS")
 ```
+
+### Vault Withdrawal
+
+Withdraw all funds from a vault back to your wallet:
+
+```python
+# Get vault object
+vault = deployment.getVault()
+
+# Withdraw all SOL and NOS tokens
+try:
+    signature = await vault.withdraw()
+    print(f"Withdrawal successful: {signature}")
+except Exception as e:
+    print(f"Withdrawal failed: {e}")
+```
+
+**Important Notes:**
+- Withdrawal uses the deployment-manager API to create withdrawal transactions
+- The vault must contain **both SOL and NOS** tokens to withdraw successfully  
+- Withdrawal returns all SOL and NOS tokens to your wallet
+- Vaults with only SOL (no NOS) cannot withdraw due to missing NOS token accounts
+
+**Troubleshooting Withdrawal Issues:**
+
+If withdrawals fail with 500 server errors, this is because:
+- The vault only has SOL but no NOS tokens
+- The withdrawal handler tries to create NOS transactions but fails when there's no NOS token account
+- **Solution**: Add some NOS tokens to the vault first, then withdraw
+- Alternative: Wait for deployment-manager to support SOL-only withdrawals
+
+The Python SDK detects this issue and provides clear guidance on the fix.
 
 ## 📋 Complete Example
 

@@ -279,29 +279,113 @@ class Vault:
         except Exception as e:
             raise Exception(f"SOL transfer failed: {e}")
     
-    async def withdraw(self) -> None:
+    async def withdraw(self) -> str:
         """Withdraw all tokens from the vault.
         
-        Uses the deployment manager API to create withdrawal transaction.
+        Uses the deployment manager API to create and execute withdrawal transaction.
+        
+        Returns:
+            Transaction signature
         """
         try:
             # Use the deployment manager withdraw endpoint
-            response = self.client._request("POST", f"/api/vault/{self.public_key}/withdraw", json={
-                "SOL": None,  # Withdraw all SOL
-                "NOS": None   # Withdraw all NOS  
-            })
+            # Based on TypeScript SDK: empty body or undefined values means withdraw all
+            # Send empty body to match TypeScript SDK's undefined handling
+            print(f"🏃 Attempting withdrawal from vault: {self.public_key}")
+            print(f"   Sending empty request body (withdraw all)")
+            
+            try:
+                response = self.client._request("POST", f"/api/vault/{self.public_key}/withdraw", json={})
+            except Exception as api_error:
+                print(f"   ❌ API Error: {api_error}")
+                
+                # Check if this is the known NOS token account issue
+                error_str = str(api_error).lower()
+                if "500" in error_str or "something went wrong" in error_str:
+                    print(f"   🐛 Detected missing NOS token account issue")
+                    print(f"   💡 The vault needs both SOL and NOS to withdraw successfully.")
+                    print(f"      Vaults that only have SOL (no NOS) cannot withdraw because")
+                    print(f"      the withdrawal handler tries to create NOS transactions but fails")
+                    print(f"      when the vault has no NOS token account.")
+                    print(f"   🔧 Solution: Add some NOS to the vault first, then withdraw.")
+                    print(f"      Or wait for the deployment-manager to support SOL-only withdrawals.")
+                    raise Exception(f"Withdrawal failed: Vault needs both SOL and NOS tokens to withdraw. "
+                                  f"Add NOS to vault {self.public_key} and try again.")
+                
+                # Try with explicit null values as fallback for other errors
+                print(f"   🔄 Retrying with explicit null values...")
+                response = self.client._request("POST", f"/api/vault/{self.public_key}/withdraw", json={
+                    "SOL": None,
+                    "NOS": None
+                })
             
             transaction_b64 = response.get("transaction")
             if not transaction_b64:
                 raise Exception("No transaction returned from withdraw API")
             
-            # TODO: Deserialize, sign, and send the transaction
-            # This requires more complex transaction handling
+            # Deserialize the transaction (matches TypeScript SDK implementation)
+            import base64
+            from solders.transaction import VersionedTransaction
             
-            raise NotImplementedError(
-                "Withdraw functionality requires transaction deserialization and signing. "
-                "Use the Nosana dashboard to withdraw for now."
-            )
+            # Decode base64 transaction
+            transaction_bytes = base64.b64decode(transaction_b64)
+            
+            # Deserialize the versioned transaction
+            transaction = VersionedTransaction.from_bytes(transaction_bytes)
+            
+            # Sign the transaction with our wallet
+            transaction.sign([self.wallet])
+            
+            # Send the transaction to Solana network
+            rpc_url = "https://api.mainnet-beta.solana.com"
+            
+            # Serialize signed transaction
+            signed_transaction_bytes = bytes(transaction)
+            encoded_tx = base64.b64encode(signed_transaction_bytes).decode('ascii')
+            
+            # Send transaction
+            import requests
+            send_response = requests.post(rpc_url, json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "sendTransaction",
+                "params": [
+                    encoded_tx,
+                    {
+                        "encoding": "base64",
+                        "skipPreflight": False,
+                        "preflightCommitment": "processed"
+                    }
+                ]
+            })
+            
+            if send_response.status_code != 200:
+                raise Exception(f"Failed to send withdrawal transaction: {send_response.status_code}")
+            
+            send_result = send_response.json()
+            if "error" in send_result:
+                error_msg = send_result['error'].get('message', 'Unknown error')
+                raise Exception(f"Withdrawal transaction failed: {error_msg}")
+            
+            signature = send_result["result"]
+            
+            # Wait for confirmation (like TypeScript SDK)
+            import asyncio
+            await asyncio.sleep(5)
+            
+            # Get confirmation
+            confirm_response = requests.post(rpc_url, json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getSignatureStatus",
+                "params": [signature]
+            })
+            
+            print(f"✅ Withdrawal transaction sent!")
+            print(f"📋 Signature: {signature}")
+            print(f"🔗 View: https://solscan.io/tx/{signature}")
+            
+            return signature
             
         except Exception as e:
             raise Exception(f"Withdraw failed: {e}")

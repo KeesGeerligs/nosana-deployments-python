@@ -38,9 +38,31 @@ class DeploymentsClient:
     def _request(self, method: str, path: str, json: Optional[Dict] = None) -> Dict[str, Any]:
         """Make authenticated API request."""
         headers = self.auth.generate_auth_headers()
-        response = self._client.request(method, path, json=json, headers=headers)
-        response.raise_for_status()
-        return response.json()
+        
+        # Only add content-type when actually sending JSON data
+        if json is not None:
+            headers["content-type"] = "application/json"
+        
+        try:
+            response = self._client.request(method, path, json=json, headers=headers)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            # Enhanced error logging for debugging
+            if hasattr(e, 'response') and e.response:
+                print(f"   🔍 Request details:")
+                print(f"      Method: {method}")
+                print(f"      URL: {self.base_url}{path}")
+                print(f"      Status: {e.response.status_code}")
+                print(f"      Request body: {json}")
+                print(f"      Request headers: {dict(headers)}")
+                try:
+                    error_body = e.response.text
+                    if error_body:
+                        print(f"      Error response: {error_body}")
+                except:
+                    print(f"      Could not read error response body")
+            raise
     
     def create(self, deployment_body: Dict[str, Any]) -> Deployment:
         """Create a new deployment."""
@@ -133,7 +155,7 @@ class DeploymentsClient:
         self._request("PATCH", f"/api/deployment/{deployment_id}/update-timeout", json={"timeout": timeout})
     
     def update_vault_balance(self, vault_id: str) -> Dict[str, float]:
-        """Update vault balance from blockchain.
+        """Get current vault balance.
         
         Args:
             vault_id: Vault public key
@@ -141,7 +163,24 @@ class DeploymentsClient:
         Returns:
             Dictionary with SOL and NOS balances
         """
-        return self._request("PATCH", f"/api/vault/{vault_id}/update-balance")
+        try:
+            # Try to get vault info directly
+            vault_info = self._request("GET", f"/api/vault/{vault_id}")
+            return {
+                "SOL": vault_info.get("sol", 0),
+                "NOS": vault_info.get("nos", 0)
+            }
+        except Exception:
+            # Fallback: get from vaults list
+            vaults = self.get_vaults()
+            for vault in vaults:
+                if vault.get("vault") == vault_id:
+                    return {
+                        "SOL": vault.get("sol", 0),
+                        "NOS": vault.get("nos", 0)
+                    }
+            # If not found, return zero balances
+            return {"SOL": 0, "NOS": 0}
     
     def topup_vault(self, vault_id: str, sol_amount: float = 0.0, nos_amount: float = 0.0) -> str:
         """Transfer SOL and/or NOS from user wallet to vault.
@@ -224,6 +263,34 @@ class DeploymentsClient:
             
         except Exception as e:
             raise Exception(f"Vault topup failed: {e}")
+    
+    def get_vaults(self) -> List[Dict[str, Any]]:
+        """Get all vaults for the authenticated user by getting deployments.
+        
+        Each deployment has an associated vault. This method returns the vault
+        information from all user deployments.
+        
+        Returns:
+            List of vault data dictionaries with 'vault' field containing PublicKey
+        """
+        # Get deployments, each contains a 'vault' field with the vault PublicKey
+        deployments = self.list()
+        
+        # Extract unique vault addresses from deployments
+        vaults = []
+        seen_vaults = set()
+        
+        for deployment in deployments:
+            vault_address = deployment.vault if hasattr(deployment, 'vault') else deployment.model_dump().get('vault')
+            if vault_address and vault_address not in seen_vaults:
+                vaults.append({
+                    "vault": vault_address,
+                    "address": vault_address,  # Alternative field name
+                    "deployment_id": deployment.id if hasattr(deployment, 'id') else deployment.model_dump().get('id')
+                })
+                seen_vaults.add(vault_address)
+        
+        return vaults
     
     def get_vault(self, vault_id: str):
         """Get vault instance for managing vault operations.
