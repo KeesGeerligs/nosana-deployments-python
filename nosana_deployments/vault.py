@@ -4,10 +4,11 @@ from typing import Dict, Optional
 import requests
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
-from solders.transaction import Transaction
+from solders.transaction import Transaction, VersionedTransaction
 from solders.system_program import transfer, TransferParams
 from solders.hash import Hash
-from solders.message import Message
+from solders.message import Message, MessageV0
+from solders.instruction import Instruction, AccountMeta
 import base64
 
 
@@ -159,7 +160,7 @@ class Vault:
             signature = await self._transfer_sol(sol, lamports)
         
         if nos > 0:
-            raise NotImplementedError("NOS transfer not yet implemented")
+            signature = await self._transfer_nos(nos, lamports)
             
         return signature
     
@@ -278,6 +279,157 @@ class Vault:
             
         except Exception as e:
             raise Exception(f"SOL transfer failed: {e}")
+    
+    async def _transfer_nos(self, amount: float, lamports: bool = False) -> str:
+        """Transfer NOS tokens from user wallet to vault using SPL token transfers.
+        
+        Matches the TypeScript SDK implementation exactly.
+        
+        Args:
+            amount: NOS amount to transfer
+            lamports: If True, amount is in raw token units (1e6 = 1 NOS)
+            
+        Returns:
+            Transaction signature
+        """
+        try:
+            # NOS token mint address
+            NOS_MINT = "nosXBVoaCTtYdLvKY6Csb4AC8JCdQKKAaWYtx2ZMoo7"
+            SPL_TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+            ASSOCIATED_TOKEN_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+            
+            # Convert to smallest units if needed (NOS has 6 decimals)
+            token_amount = int(amount) if lamports else int(amount * 1_000_000)
+            
+            # Create public keys
+            from_pubkey = Pubkey.from_string(str(self.wallet.pubkey()))
+            to_pubkey = Pubkey.from_string(self.public_key)
+            nos_mint = Pubkey.from_string(NOS_MINT)
+            spl_token_program = Pubkey.from_string(SPL_TOKEN_PROGRAM)
+            ata_program = Pubkey.from_string(ASSOCIATED_TOKEN_PROGRAM)
+            
+            # Get associated token accounts
+            from_token_account = self._get_associated_token_account(from_pubkey, nos_mint, ata_program, spl_token_program)
+            to_token_account = self._get_associated_token_account(to_pubkey, nos_mint, ata_program, spl_token_program)
+            
+            # RPC connection
+            rpc_url = "https://api.mainnet-beta.solana.com"
+            
+            # Check NOS balance first
+            balance_response = requests.post(rpc_url, json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getTokenAccountBalance",
+                "params": [str(from_token_account)]
+            })
+            
+            if balance_response.status_code == 200:
+                balance_result = balance_response.json()
+                if "result" in balance_result and balance_result["result"]["value"]:
+                    current_balance = int(balance_result["result"]["value"]["amount"])
+                    if current_balance < token_amount:
+                        raise Exception(f"Insufficient NOS balance. Have {current_balance/1e6:.6f} NOS, need {token_amount/1e6:.6f} NOS")
+            
+            # Get recent blockhash
+            blockhash_response = requests.post(rpc_url, json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getLatestBlockhash",
+                "params": [{"commitment": "finalized"}]
+            })
+            
+            if blockhash_response.status_code != 200:
+                raise Exception("Failed to get recent blockhash")
+            
+            blockhash = blockhash_response.json()["result"]["value"]["blockhash"]
+            
+            # Create SPL token transfer instruction
+            transfer_instruction = self._create_spl_transfer_instruction(
+                from_token_account,
+                to_token_account, 
+                from_pubkey,
+                token_amount,
+                spl_token_program
+            )
+            
+            # Build transaction
+            message = MessageV0.try_compile(
+                payer=from_pubkey,
+                instructions=[transfer_instruction],
+                address_lookup_tables=[],
+                recent_blockhash=blockhash
+            )
+            
+            # Create and sign transaction
+            transaction = VersionedTransaction(message, [self.wallet])
+            
+            # Send transaction
+            import base64
+            transaction_bytes = bytes(transaction)
+            encoded_tx = base64.b64encode(transaction_bytes).decode('ascii')
+            
+            send_response = requests.post(rpc_url, json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "sendTransaction",
+                "params": [
+                    encoded_tx,
+                    {
+                        "encoding": "base64",
+                        "skipPreflight": False,
+                        "preflightCommitment": "processed",
+                        "maxRetries": 3
+                    }
+                ]
+            })
+            
+            if send_response.status_code != 200:
+                raise Exception(f"Transaction failed: {send_response.text}")
+            
+            send_result = send_response.json()
+            if "error" in send_result:
+                raise Exception(f"Transaction error: {send_result['error']}")
+            
+            signature = send_result.get("result")
+            if not signature:
+                raise Exception("No transaction signature returned")
+            
+            print(f"✅ NOS transfer successful!")
+            print(f"   Amount: {amount} NOS ({token_amount:,} units)")
+            print(f"   From: {from_pubkey}")  
+            print(f"   To: {to_pubkey}")
+            print(f"   Signature: {signature}")
+            print(f"   View: https://solscan.io/tx/{signature}")
+            
+            return signature
+            
+        except Exception as e:
+            raise Exception(f"NOS transfer failed: {e}")
+    
+    def _get_associated_token_account(self, owner: Pubkey, mint: Pubkey, ata_program: Pubkey, token_program: Pubkey) -> Pubkey:
+        """Get associated token account address for a given owner and mint."""
+        # Find PDA for associated token account
+        seeds = [bytes(owner), bytes(token_program), bytes(mint)]
+        ata_address, _ = Pubkey.find_program_address(seeds, ata_program)
+        return ata_address
+    
+    def _create_spl_transfer_instruction(self, source: Pubkey, destination: Pubkey, owner: Pubkey, amount: int, token_program: Pubkey):
+        """Create SPL token transfer instruction."""
+        from solders.instruction import Instruction, AccountMeta
+        
+        # SPL Token Transfer instruction data
+        # Instruction: 3 (Transfer) + amount (8 bytes little endian)
+        instruction_data = bytes([3]) + amount.to_bytes(8, 'little')
+        
+        return Instruction(
+            program_id=token_program,
+            accounts=[
+                AccountMeta(pubkey=source, is_signer=False, is_writable=True),
+                AccountMeta(pubkey=destination, is_signer=False, is_writable=True), 
+                AccountMeta(pubkey=owner, is_signer=True, is_writable=False),
+            ],
+            data=instruction_data
+        )
     
     async def withdraw(self) -> str:
         """Withdraw all tokens from the vault.
