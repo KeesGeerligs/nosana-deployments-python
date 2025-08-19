@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional, Any, Callable
+from typing import List, Optional, Any, Dict, TYPE_CHECKING
 
-from pydantic import Field, field_validator
+from pydantic import Field
 
 from .base import BaseNosanaModel
+
+if TYPE_CHECKING:
+    from ..client import DeploymentsClient
 
 
 class DeploymentStatus(str, Enum):
@@ -37,64 +40,91 @@ class DeploymentStrategy(str, Enum):
 
 
 class Deployment(BaseNosanaModel):
-    """Deployment model matching TypeScript SDK structure."""
+    """Deployment model matching TypeScript SDK structure exactly."""
     
-    # Core fields
-    id: str = Field(..., description="Deployment ID")
-    name: str = Field(..., description="Deployment name")
-    market: str = Field(..., description="Market public key")
-    owner: str = Field(..., description="Owner public key")
-    timeout: int = Field(..., ge=60, description="Timeout in seconds")
-    replicas: int = Field(..., ge=1, description="Number of replicas")
-    status: DeploymentStatus = Field(..., description="Deployment status")
-    ipfs_definition_hash: str = Field(..., alias="ipfs_definition_hash", description="IPFS hash of job definition")
-    events: List[dict] = Field(default_factory=list, description="Deployment events")
-    jobs: List[dict] = Field(default_factory=list, description="Associated jobs")
-    updated_at: datetime = Field(..., description="Last update timestamp")
-    created_at: datetime = Field(..., description="Creation timestamp")
-    vault: str = Field(..., description="Vault public key")
+    # Core fields - backend determines structure so no validation
+    id: str
+    name: str 
+    market: str
+    owner: str
+    timeout: int
+    replicas: int
+    status: str  # Use string instead of enum since backend determines
+    ipfs_definition_hash: str = Field(alias="ipfs_definition_hash")
+    events: List[dict] = Field(default_factory=list)
+    jobs: List[dict] = Field(default_factory=list)
+    updated_at: datetime
+    created_at: datetime
+    vault: str
+    strategy: str  # Use string instead of enum since backend determines
+    schedule: Optional[str] = None
     
-    # Strategy-dependent fields
-    strategy: DeploymentStrategy = Field(..., description="Deployment strategy")
-    schedule: Optional[str] = Field(None, description="Cron expression for scheduled deployments")
+    # Private fields for client reference
+    _client: Optional[DeploymentsClient] = Field(default=None, exclude=True)
     
-    @field_validator("schedule")
-    @classmethod
-    def validate_schedule(cls, v: Optional[str], info) -> Optional[str]:
-        """Validate schedule field based on strategy."""
-        strategy = info.data.get("strategy")
-        
-        if strategy == DeploymentStrategy.SCHEDULED and not v:
-            raise ValueError("Schedule is required when strategy is SCHEDULED")
-        elif strategy != DeploymentStrategy.SCHEDULED and v:
-            raise ValueError("Schedule can only be set when strategy is SCHEDULED")
-            
-        return v
+    def model_post_init(self, __context: Any) -> None:
+        """Initialize methods after model creation."""
+        # Methods will be available directly on the instance
+        pass
+    
+    def start(self) -> None:
+        """Start the deployment."""
+        if not self._client:
+            raise RuntimeError("Deployment not attached to client")
+        self._client._request("POST", f"/api/deployment/{self.id}/start")
+    
+    def stop(self) -> None:
+        """Stop the deployment."""
+        if not self._client:
+            raise RuntimeError("Deployment not attached to client")
+        self._client._request("POST", f"/api/deployment/{self.id}/stop")
+    
+    def archive(self) -> None:
+        """Archive the deployment."""
+        if not self._client:
+            raise RuntimeError("Deployment not attached to client")
+        self._client._request("PATCH", f"/api/deployment/{self.id}/archive")
+    
+    def getTasks(self) -> List[Dict[str, Any]]:
+        """Get deployment tasks."""
+        if not self._client:
+            raise RuntimeError("Deployment not attached to client")
+        return self._client._request("GET", f"/api/deployment/{self.id}/tasks")
+    
+    def updateReplicaCount(self, replicas: int) -> None:
+        """Update replica count."""
+        if not self._client:
+            raise RuntimeError("Deployment not attached to client")
+        self._client._request("PATCH", f"/api/deployment/{self.id}/update-replica-count", json={"replicas": replicas})
+        self.replicas = replicas  # Update local state
+    
+    def updateTimeout(self, timeout: int) -> None:
+        """Update timeout."""
+        if not self._client:
+            raise RuntimeError("Deployment not attached to client")
+        self._client._request("PATCH", f"/api/deployment/{self.id}/update-timeout", json={"timeout": timeout})
+        self.timeout = timeout  # Update local state
+    
+    @property
+    def vault_instance(self):
+        """Get vault instance for this deployment."""
+        if not self._client:
+            raise RuntimeError("Deployment not attached to client")
+        return self._client.get_vault(self.vault)
+    
 
 
 class DeploymentCreateRequest(BaseNosanaModel):
     """Request model for creating a new deployment."""
     
-    name: str = Field(..., description="Deployment name")
-    market: str = Field(..., description="Market public key")
-    ipfs_definition_hash: str = Field(..., alias="ipfs_definition_hash", description="IPFS hash of job definition")
-    replicas: int = Field(1, ge=1, description="Number of replicas")
-    timeout: int = Field(3600, ge=60, description="Timeout in seconds")
-    strategy: DeploymentStrategy = Field(..., description="Deployment strategy")
-    schedule: Optional[str] = Field(None, description="Cron expression for scheduled deployments")
+    name: str
+    market: str
+    ipfs_definition_hash: str = Field(alias="ipfs_definition_hash")
+    replicas: int = Field(default=1)
+    timeout: int = Field(default=3600)
+    strategy: str
+    schedule: Optional[str] = None
     
-    @field_validator("schedule")
-    @classmethod
-    def validate_schedule_create(cls, v: Optional[str], info) -> Optional[str]:
-        """Validate schedule field for create request."""
-        strategy = info.data.get("strategy")
-        
-        if strategy == DeploymentStrategy.SCHEDULED and not v:
-            raise ValueError("Schedule is required when strategy is SCHEDULED")
-        elif strategy != DeploymentStrategy.SCHEDULED and v:
-            raise ValueError("Schedule can only be set when strategy is SCHEDULED")
-            
-        return v
 
 
 # Keep it simple - no response models needed

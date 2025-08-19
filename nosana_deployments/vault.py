@@ -33,11 +33,12 @@ class Vault:
         Returns:
             Dictionary with SOL and NOS balances
         """
-        try:
-            return self.client.update_vault_balance(self.public_key)
-        except Exception as e:
-            # Fallback to direct blockchain query
-            return await self._get_balance_direct()
+        # Get vault info directly from API
+        vault_info = self.client._request("GET", f"/api/vault/{self.public_key}")
+        return {
+            "SOL": vault_info.get("sol", 0),
+            "NOS": vault_info.get("nos", 0)
+        }
     
     async def _get_balance_direct(self) -> Dict[str, float]:
         """Get balance directly from Solana RPC."""
@@ -476,35 +477,8 @@ class Vault:
         """
         try:
             # Use the deployment manager withdraw endpoint
-            # Based on TypeScript SDK: empty body or undefined values means withdraw all
-            # Send empty body to match TypeScript SDK's undefined handling
-            print(f"🏃 Attempting withdrawal from vault: {self.public_key}")
-            print(f"   Sending empty request body (withdraw all)")
-            
-            try:
-                response = self.client._request("POST", f"/api/vault/{self.public_key}/withdraw", json={})
-            except Exception as api_error:
-                print(f"   ❌ API Error: {api_error}")
-                
-                # Check if this is the known NOS token account issue
-                error_str = str(api_error).lower()
-                if "500" in error_str or "something went wrong" in error_str:
-                    print(f"   🐛 Detected missing NOS token account issue")
-                    print(f"   💡 The vault needs both SOL and NOS to withdraw successfully.")
-                    print(f"      Vaults that only have SOL (no NOS) cannot withdraw because")
-                    print(f"      the withdrawal handler tries to create NOS transactions but fails")
-                    print(f"      when the vault has no NOS token account.")
-                    print(f"   🔧 Solution: Add some NOS to the vault first, then withdraw.")
-                    print(f"      Or wait for the deployment-manager to support SOL-only withdrawals.")
-                    raise Exception(f"Withdrawal failed: Vault needs both SOL and NOS tokens to withdraw. "
-                                  f"Add NOS to vault {self.public_key} and try again.")
-                
-                # Try with explicit null values as fallback for other errors
-                print(f"   🔄 Retrying with explicit null values...")
-                response = self.client._request("POST", f"/api/vault/{self.public_key}/withdraw", json={
-                    "SOL": None,
-                    "NOS": None
-                })
+            # Send empty body to withdraw all funds
+            response = self.client._request("POST", f"/api/vault/{self.public_key}/withdraw", json={})
             
             transaction_b64 = response.get("transaction")
             if not transaction_b64:

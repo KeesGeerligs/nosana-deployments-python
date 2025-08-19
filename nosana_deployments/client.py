@@ -5,11 +5,10 @@ Nosana Deployments Client - matches TypeScript SDK structure exactly.
 from __future__ import annotations
 
 import os
-from typing import Dict, List, Union, Callable, Any, Optional
+from typing import Dict, List, Union, Any, Optional
 
 from solders.keypair import Keypair
 import httpx
-import requests
 
 from .models.deployment import Deployment, DeploymentCreateRequest
 from .auth import WalletAuth
@@ -73,16 +72,16 @@ class DeploymentsClient:
         data = self._request("POST", "/api/deployment/create", json=request.to_dict())
         deployment_data = data
         
-        # Create deployment with methods attached
+        # Create deployment and attach client reference
         deployment = Deployment.model_validate(deployment_data)
-        self._attach_methods(deployment)
+        deployment._client = self
         return deployment
     
     def get(self, deployment_id: str) -> Deployment:
         """Get deployment by ID."""
         data = self._request("GET", f"/api/deployment/{deployment_id}")
         deployment = Deployment.model_validate(data)
-        self._attach_methods(deployment)
+        deployment._client = self
         return deployment
     
     def list(self) -> List[Deployment]:
@@ -90,7 +89,7 @@ class DeploymentsClient:
         data = self._request("GET", "/api/deployments")
         deployments = [Deployment.model_validate(d) for d in data]
         for deployment in deployments:
-            self._attach_methods(deployment)
+            deployment._client = self
         return deployments
     
     def pipe(
@@ -113,184 +112,10 @@ class DeploymentsClient:
         
         return deployment
     
-    def _attach_methods(self, deployment: Deployment) -> None:
-        """Attach methods to deployment instance."""
-        # Store reference to client for methods
-        deployment.__dict__['_client'] = self
-        
-        # Attach methods that match TypeScript SDK exactly
-        deployment.__dict__['start'] = lambda: self._start_deployment(deployment.id)
-        deployment.__dict__['stop'] = lambda: self._stop_deployment(deployment.id)
-        deployment.__dict__['archive'] = lambda: self._archive_deployment(deployment.id)
-        deployment.__dict__['getTasks'] = lambda: self._get_deployment_tasks(deployment.id)
-        deployment.__dict__['updateReplicaCount'] = lambda replicas: self._update_replica_count(deployment.id, replicas)
-        deployment.__dict__['updateTimeout'] = lambda timeout: self._update_timeout(deployment.id, timeout)
-        deployment.__dict__['updateVaultBalance'] = lambda: self.update_vault_balance(deployment.vault)
-        
-        # Attach vault instance
-        deployment.__dict__['vault_instance'] = lambda: self.get_vault(deployment.vault)
     
-    def _start_deployment(self, deployment_id: str) -> None:
-        """Start deployment."""
-        self._request("POST", f"/api/deployment/{deployment_id}/start")
     
-    def _stop_deployment(self, deployment_id: str) -> None:
-        """Stop deployment."""
-        self._request("POST", f"/api/deployment/{deployment_id}/stop")
     
-    def _archive_deployment(self, deployment_id: str) -> None:
-        """Archive deployment."""
-        self._request("PATCH", f"/api/deployment/{deployment_id}/archive")
     
-    def _get_deployment_tasks(self, deployment_id: str) -> List[Dict[str, Any]]:
-        """Get deployment tasks."""
-        return self._request("GET", f"/api/deployment/{deployment_id}/tasks")
-    
-    def _update_replica_count(self, deployment_id: str, replicas: int) -> None:
-        """Update replica count."""
-        self._request("PATCH", f"/api/deployment/{deployment_id}/update-replica-count", json={"replicas": replicas})
-    
-    def _update_timeout(self, deployment_id: str, timeout: int) -> None:
-        """Update timeout."""
-        self._request("PATCH", f"/api/deployment/{deployment_id}/update-timeout", json={"timeout": timeout})
-    
-    def update_vault_balance(self, vault_id: str) -> Dict[str, float]:
-        """Get current vault balance.
-        
-        Args:
-            vault_id: Vault public key
-            
-        Returns:
-            Dictionary with SOL and NOS balances
-        """
-        try:
-            # Try to get vault info directly
-            vault_info = self._request("GET", f"/api/vault/{vault_id}")
-            return {
-                "SOL": vault_info.get("sol", 0),
-                "NOS": vault_info.get("nos", 0)
-            }
-        except Exception:
-            # Fallback: get from vaults list
-            vaults = self.get_vaults()
-            for vault in vaults:
-                if vault.get("vault") == vault_id:
-                    return {
-                        "SOL": vault.get("sol", 0),
-                        "NOS": vault.get("nos", 0)
-                    }
-            # If not found, return zero balances
-            return {"SOL": 0, "NOS": 0}
-    
-    def topup_vault(self, vault_id: str, sol_amount: float = 0.0, nos_amount: float = 0.0) -> str:
-        """Transfer SOL and/or NOS from user wallet to vault.
-        
-        Args:
-            vault_id: Target vault public key
-            sol_amount: Amount of SOL to transfer (e.g. 0.01 = 0.01 SOL)
-            nos_amount: Amount of NOS to transfer (e.g. 10 = 10 NOS)
-            
-        Returns:
-            Transaction signature
-        """
-        if sol_amount <= 0 and nos_amount <= 0:
-            raise ValueError("Must specify positive amount for SOL or NOS")
-        
-        # For now, implement SOL transfer (simpler)
-        if sol_amount > 0:
-            return self._transfer_sol_to_vault(vault_id, sol_amount)
-        else:
-            raise NotImplementedError("NOS transfer not yet implemented")
-    
-    def _transfer_sol_to_vault(self, vault_id: str, sol_amount: float) -> str:
-        """Transfer SOL from user wallet to vault using Solana RPC.
-        
-        Args:
-            vault_id: Target vault public key
-            sol_amount: SOL amount to transfer
-            
-        Returns:
-            Transaction signature
-        """
-        try:
-            # Convert SOL to lamports
-            lamports = int(sol_amount * 1_000_000_000)
-            
-            # Create transfer instruction
-            from_pubkey = Pubkey.from_string(str(self.wallet.pubkey()))
-            to_pubkey = Pubkey.from_string(vault_id)
-            
-            # Use public Solana RPC (you may want to use a dedicated RPC endpoint)
-            rpc_url = "https://api.mainnet-beta.solana.com"
-            
-            # Get recent blockhash
-            response = requests.post(rpc_url, json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "getLatestBlockhash"
-            })
-            
-            if response.status_code != 200:
-                raise Exception(f"Failed to get blockhash: {response.status_code}")
-            
-            result = response.json()
-            if "error" in result:
-                raise Exception(f"RPC error: {result['error']}")
-                
-            blockhash = result["result"]["value"]["blockhash"]
-            
-            # Create transfer instruction
-            transfer_ix = transfer(
-                TransferParams(
-                    from_pubkey=from_pubkey,
-                    to_pubkey=to_pubkey, 
-                    lamports=lamports
-                )
-            )
-            
-            # This is a simplified implementation
-            # A full implementation would need to:
-            # 1. Create a proper transaction with the instruction
-            # 2. Sign it with the wallet
-            # 3. Send it to the network
-            # 4. Wait for confirmation
-            
-            raise NotImplementedError(
-                "Direct SOL transfer requires more complex transaction building. "
-                "Please fund the vault manually for now. "
-                f"Send {sol_amount} SOL to: {vault_id}"
-            )
-            
-        except Exception as e:
-            raise Exception(f"Vault topup failed: {e}")
-    
-    def get_vaults(self) -> List[Dict[str, Any]]:
-        """Get all vaults for the authenticated user by getting deployments.
-        
-        Each deployment has an associated vault. This method returns the vault
-        information from all user deployments.
-        
-        Returns:
-            List of vault data dictionaries with 'vault' field containing PublicKey
-        """
-        # Get deployments, each contains a 'vault' field with the vault PublicKey
-        deployments = self.list()
-        
-        # Extract unique vault addresses from deployments
-        vaults = []
-        seen_vaults = set()
-        
-        for deployment in deployments:
-            vault_address = deployment.vault if hasattr(deployment, 'vault') else deployment.model_dump().get('vault')
-            if vault_address and vault_address not in seen_vaults:
-                vaults.append({
-                    "vault": vault_address,
-                    "address": vault_address,  # Alternative field name
-                    "deployment_id": deployment.id if hasattr(deployment, 'id') else deployment.model_dump().get('id')
-                })
-                seen_vaults.add(vault_address)
-        
-        return vaults
     
     def get_vault(self, vault_id: str):
         """Get vault instance for managing vault operations.
